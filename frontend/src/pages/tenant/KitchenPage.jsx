@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../store/authStore';
 import { ordersApi, SSE_URL } from '../../api/client';
-import { ChefHat, Clock, CheckCircle2, XCircle, Wifi, WifiOff, ArrowDown, ArrowLeft } from 'lucide-react';
+import { ChefHat, Clock, CheckCircle2, XCircle, Wifi, WifiOff, ArrowLeft } from 'lucide-react';
 import { StatusBadge } from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
 import toast from 'react-hot-toast';
@@ -15,7 +15,7 @@ const STATUS_COLUMNS = [
   { key: 'ready', label: 'Ready for Pickup', color: 'green', next: 'completed', nextLabel: 'Complete' },
 ];
 
-function OrderCard({ order, tenantId, onStatusUpdate }) {
+function OrderCard({ order, tenantId, onStatusUpdate, animClass }) {
   const [loading, setLoading] = useState(false);
   const col = STATUS_COLUMNS.find(c => c.key === order.status);
   const elapsed = order.created_at
@@ -53,7 +53,7 @@ function OrderCard({ order, tenantId, onStatusUpdate }) {
   const borderColors = { confirmed: 'border-blue-300', preparing: 'border-yellow-300', ready: 'border-green-300' };
 
   return (
-    <div className={`bg-white rounded-xl border-2 ${borderColors[order.status] || 'border-gray-200'} p-4 shadow-sm animate-slide-up`}>
+    <div className={`bg-white rounded-xl border-2 ${borderColors[order.status] || 'border-gray-200'} p-4 shadow-sm ${animClass}`}>
       <div className="flex items-start justify-between mb-2">
         <div>
           <p className="font-bold text-gray-900 text-base">#{order.id}</p>
@@ -85,6 +85,7 @@ function OrderCard({ order, tenantId, onStatusUpdate }) {
       <div className="flex gap-2">
         {col?.next && (
           <Button
+            type="button"
             size="sm"
             loading={loading}
             className="flex-1 justify-center"
@@ -96,6 +97,7 @@ function OrderCard({ order, tenantId, onStatusUpdate }) {
         )}
         {order.status !== 'completed' && (
           <button
+            type="button"
             onClick={cancel}
             disabled={loading}
             className="p-1.5 hover:bg-red-50 rounded-lg transition-colors"
@@ -117,15 +119,55 @@ export default function KitchenPage() {
 
   const [orders, setOrders] = useState({ confirmed: [], preparing: [], ready: [] });
   const [connected, setConnected] = useState(false);
-  const [autoScroll, setAutoScroll] = useState(true);
+  // Track which order IDs are brand-new (slide in) vs just moved column (fade in)
+  const [newOrderIds, setNewOrderIds] = useState(new Set());
+  const [movedOrderIds, setMovedOrderIds] = useState(new Set());
+  const prevOrdersRef = useRef({ confirmed: [], preparing: [], ready: [] });
   const esRef = useRef(null);
-  const colRefs = useRef({});
+
+  const applyOrders = useCallback((incoming) => {
+    const prev = prevOrdersRef.current;
+    const prevAllIds = new Set([
+      ...(prev.confirmed || []).map(o => o.id),
+      ...(prev.preparing || []).map(o => o.id),
+      ...(prev.ready || []).map(o => o.id),
+    ]);
+    const prevStatusMap = {};
+    ['confirmed', 'preparing', 'ready'].forEach(col => {
+      (prev[col] || []).forEach(o => { prevStatusMap[o.id] = col; });
+    });
+
+    const brandNew = new Set();
+    const moved = new Set();
+
+    ['confirmed', 'preparing', 'ready'].forEach(col => {
+      (incoming[col] || []).forEach(o => {
+        if (!prevAllIds.has(o.id)) {
+          brandNew.add(o.id);
+        } else if (prevStatusMap[o.id] && prevStatusMap[o.id] !== col) {
+          moved.add(o.id);
+        }
+      });
+    });
+
+    if (brandNew.size > 0) {
+      setNewOrderIds(brandNew);
+      setTimeout(() => setNewOrderIds(new Set()), 600);
+    }
+    if (moved.size > 0) {
+      setMovedOrderIds(moved);
+      setTimeout(() => setMovedOrderIds(new Set()), 500);
+    }
+
+    prevOrdersRef.current = incoming;
+    setOrders(incoming);
+  }, []);
 
   const refreshOrders = useCallback(() => {
     ordersApi.getKitchenOrders(tenantId)
-      .then(r => setOrders(r.data.orders || { confirmed: [], preparing: [], ready: [] }))
+      .then(r => applyOrders(r.data.orders || { confirmed: [], preparing: [], ready: [] }))
       .catch(() => {});
-  }, [tenantId]);
+  }, [tenantId, applyOrders]);
 
   // SSE connection
   useEffect(() => {
@@ -141,46 +183,30 @@ export default function KitchenPage() {
         try {
           const data = JSON.parse(e.data);
           if (data.error) return;
-          setOrders(data);
+          applyOrders(data);
         } catch {}
       };
       es.onerror = () => {
         setConnected(false);
         es.close();
-        // Fallback poll every 5s if SSE drops
         setTimeout(connect, 5000);
       };
     };
 
     connect();
     return () => { esRef.current?.close(); };
-  }, [tenantId]);
-
-  // Auto-scroll each column
-  useEffect(() => {
-    if (!autoScroll) return;
-    const interval = setInterval(() => {
-      Object.values(colRefs.current).forEach(el => {
-        if (!el) return;
-        const { scrollTop, scrollHeight, clientHeight } = el;
-        if (scrollTop + clientHeight < scrollHeight) {
-          el.scrollBy({ top: 80, behavior: 'smooth' });
-        } else {
-          el.scrollTo({ top: 0, behavior: 'smooth' });
-        }
-      });
-    }, 4000);
-    return () => clearInterval(interval);
-  }, [autoScroll]);
+  }, [tenantId, applyOrders]);
 
   const totalActive = (orders.confirmed?.length || 0) + (orders.preparing?.length || 0) + (orders.ready?.length || 0);
+
+  const headerColors = { blue: 'bg-blue-600', yellow: 'bg-yellow-500', green: 'bg-green-600' };
 
   return (
     <div className="space-y-4 animate-fade-in">
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-3">
-          <button onClick={() => navigate(`/tenant/${tenantId}`)} className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-400 hover:text-gray-600 transition-colors">
+          <button type="button" onClick={() => navigate(`/tenant/${tenantId}`)} className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-400 hover:text-gray-600 transition-colors">
             <ArrowLeft className="h-5 w-5" />
           </button>
           <ChefHat className="h-5 w-5 text-brand-600" />
@@ -190,13 +216,6 @@ export default function KitchenPage() {
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => setAutoScroll(v => !v)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${autoScroll ? 'bg-brand-100 text-brand-700' : 'bg-gray-100 text-gray-600'}`}
-          >
-            <ArrowDown className="h-3.5 w-3.5" />
-            Auto-scroll {autoScroll ? 'ON' : 'OFF'}
-          </button>
           <div className={`flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg ${connected ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}>
             {connected ? <Wifi className="h-3.5 w-3.5" /> : <WifiOff className="h-3.5 w-3.5" />}
             {connected ? 'Live' : 'Reconnecting...'}
@@ -209,21 +228,13 @@ export default function KitchenPage() {
       <div className="grid grid-cols-3 gap-4 h-[calc(100vh-180px)]">
         {STATUS_COLUMNS.map(col => {
           const colOrders = orders[col.key] || [];
-          const headerColors = {
-            blue: 'bg-blue-600',
-            yellow: 'bg-yellow-500',
-            green: 'bg-green-600',
-          };
           return (
             <div key={col.key} className="flex flex-col min-h-0">
               <div className={`${headerColors[col.color]} text-white rounded-t-xl px-4 py-3 flex items-center justify-between flex-shrink-0`}>
                 <span className="font-semibold text-sm">{col.label}</span>
                 <span className="bg-white/20 px-2 py-0.5 rounded-full text-xs font-bold">{colOrders.length}</span>
               </div>
-              <div
-                ref={el => colRefs.current[col.key] = el}
-                className="flex-1 overflow-y-auto bg-gray-50 rounded-b-xl p-3 space-y-3 border border-t-0 border-gray-200"
-              >
+              <div className="flex-1 overflow-y-auto bg-gray-50 rounded-b-xl p-3 space-y-3 border border-t-0 border-gray-200">
                 {colOrders.length === 0 ? (
                   <div className="flex flex-col items-center justify-center h-40 text-gray-300">
                     <ChefHat className="h-10 w-10 mb-2" />
@@ -236,6 +247,10 @@ export default function KitchenPage() {
                       order={order}
                       tenantId={tenantId}
                       onStatusUpdate={refreshOrders}
+                      animClass={
+                        newOrderIds.has(order.id) ? 'order-enter' :
+                        movedOrderIds.has(order.id) ? 'order-update' : ''
+                      }
                     />
                   ))
                 )}

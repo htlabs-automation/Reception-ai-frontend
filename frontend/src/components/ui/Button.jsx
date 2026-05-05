@@ -12,10 +12,11 @@ const sizes = {
 };
 
 export default function Button({
-  children, variant = 'primary', size = 'md', className = '', disabled, loading, ...props
+  children, variant = 'primary', size = 'md', className = '', disabled, loading, type = 'button', ...props
 }) {
   return (
     <button
+      type={type}
       disabled={disabled || loading}
       className={`inline-flex items-center gap-2 font-medium rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-1 disabled:opacity-50 disabled:cursor-not-allowed ${variants[variant]} ${sizes[size]} ${className}`}
       {...props}

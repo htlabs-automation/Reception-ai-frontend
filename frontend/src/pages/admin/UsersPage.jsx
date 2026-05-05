@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { UserPlus, Pencil, Trash2, ShieldCheck, User } from 'lucide-react';
+import { UserPlus, Pencil, Trash2, ShieldCheck, User, Save } from 'lucide-react';
 import { adminApi, tenantApi } from '../../api/client';
 import Card, { CardHeader } from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
@@ -55,6 +55,7 @@ function UserForm({ initial = {}, tenants = [], onSubmit, loading, isEdit }) {
 export default function UsersPage() {
   const qc = useQueryClient();
   const [modal, setModal] = useState(null); // null | { mode: 'create' | 'edit', user?: {} }
+  const [inlineRestaurant, setInlineRestaurant] = useState({}); // { [userId]: tenantId }
 
   const { data: usersData } = useQuery({ queryKey: ['users'], queryFn: () => adminApi.getUsers().then(r => r.data.users) });
   const { data: tenantsData } = useQuery({ queryKey: ['tenants'], queryFn: () => tenantApi.list().then(r => r.data.tenants) });
@@ -99,7 +100,7 @@ export default function UsersPage() {
         <table className="w-full text-sm">
           <thead className="bg-gray-50 border-b border-gray-100">
             <tr>
-              {['User', 'Role', 'Restaurant', 'Status', ''].map(h => (
+              {['User', 'Role', 'Assign Restaurant', 'Status', ''].map(h => (
                 <th key={h} className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">{h}</th>
               ))}
             </tr>
@@ -126,7 +127,32 @@ export default function UsersPage() {
                     {u.role === 'superadmin' ? 'Super Admin' : 'Staff'}
                   </Badge>
                 </td>
-                <td className="px-4 py-3 text-gray-600">{u.tenant_name || '—'}</td>
+                <td className="px-4 py-3">
+                  <div className="flex items-center gap-2">
+                    <select
+                      className="text-sm border border-gray-200 rounded-lg px-2 py-1 text-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                      value={inlineRestaurant[u.id] !== undefined ? inlineRestaurant[u.id] : (u.tenant_id || '')}
+                      onChange={(e) => setInlineRestaurant({ ...inlineRestaurant, [u.id]: e.target.value })}
+                    >
+                      <option value="">— None —</option>
+                      {tenants.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    </select>
+                    {inlineRestaurant[u.id] !== undefined && inlineRestaurant[u.id] !== (u.tenant_id || '') && (
+                      <button
+                        onClick={() => {
+                          updateMut.mutate(
+                            { id: u.id, data: { tenant_id: inlineRestaurant[u.id] || null } },
+                            { onSuccess: () => setInlineRestaurant((prev) => { const n = { ...prev }; delete n[u.id]; return n; }) }
+                          );
+                        }}
+                        className="p-1.5 bg-brand-600 hover:bg-brand-700 text-white rounded-lg transition-colors"
+                        title="Save restaurant"
+                      >
+                        <Save className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </td>
                 <td className="px-4 py-3">
                   <Badge color={u.is_active ? 'green' : 'red'}>{u.is_active ? 'Active' : 'Disabled'}</Badge>
                 </td>
